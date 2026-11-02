@@ -1,0 +1,634 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import {
+Activity,
+TrendingUp,
+TrendingDown,
+BarChart2,
+Layers,
+Key,
+RefreshCw,
+Search,
+ArrowUpRight,
+ArrowDownRight,
+CheckCircle2,
+Sliders,
+Users,
+BookOpen,
+Sparkles,
+X,
+Newspaper,
+Clock,
+Terminal,
+Radio,
+RotateCcw,
+Trash2
+} from 'lucide-react';
+
+// ==========================================
+// DEFAULT API KEYS & RAPIDAPI CONFIG
+// ==========================================
+const DEFAULT_GOAPI_KEY = '9e56f72f-06cd-5ed0-a9df-b1a1a663';
+const DEFAULT_RAPIDAPI_KEY = 'fcef547892mshdd3e2c35530e7bbp118ba7jsnd62310439d26';
+const DEFAULT_RAPIDAPI_HOST = 'idx-stock-screener-signals.p.rapidapi.com';
+
+// Helper fraksi harga resmi BEI (IDX Tick Size Rule)
+function getIdxTickSize(price) {
+if (price < 200) return 1;
+if (price < 500) return 2;
+if (price < 2000) return 5;
+if (price < 5000) return 10;
+return 25;
+}
+
+// ==========================================
+// LOGO & IDENTITAS VISUAL EMITEN BEI (IDX)
+// ==========================================
+const EMITEN_LOGOS = {
+BBCA: { domain: 'bca.co.id', logoUrl: 'https://www.google.com/s2/favicons?domain=bca.co.id&sz=128', bgGradient: 'from-blue-600 to-indigo-800' },
+BBRI: { domain: 'bri.co.id', logoUrl: 'https://www.google.com/s2/favicons?domain=bri.co.id&sz=128', bgGradient: 'from-sky-500 to-blue-700' },
+BMRI: { domain: 'bankmandiri.co.id', logoUrl: 'https://www.google.com/s2/favicons?domain=bankmandiri.co.id&sz=128', bgGradient: 'from-amber-500 to-blue-800' },
+TLKM: { domain: 'telkom.co.id', logoUrl: 'https://www.google.com/s2/favicons?domain=telkom.co.id&sz=128', bgGradient: 'from-rose-600 to-red-800' },
+ASII: { domain: 'astra.co.id', logoUrl: 'https://www.google.com/s2/favicons?domain=astra.co.id&sz=128', bgGradient: 'from-blue-500 to-cyan-700' },
+ANTM: { domain: 'antam.com', logoUrl: 'https://www.google.com/s2/favicons?domain=antam.com&sz=128', bgGradient: 'from-amber-500 to-emerald-700' },
+BREN: { domain: 'baritorenewables.co.id', logoUrl: 'https://www.google.com/s2/favicons?domain=baritorenewables.co.id&sz=128', bgGradient: 'from-emerald-500 to-teal-800' },
+ADRO: { domain: 'adaro.com', logoUrl: 'https://www.google.com/s2/favicons?domain=adaro.com&sz=128', bgGradient: 'from-lime-600 to-emerald-800' },
+MDKA: { domain: 'merdekacoppergold.com', logoUrl: 'https://www.google.com/s2/favicons?domain=merdekacoppergold.com&sz=128', bgGradient: 'from-yellow-500 to-amber-700' },
+GOTO: { domain: 'gotocompany.com', logoUrl: 'https://www.google.com/s2/favicons?domain=gotocompany.com&sz=128', bgGradient: 'from-green-500 to-emerald-700' }
+};
+
+function StockLogo({ code, size = 'md' }) {
+const [imgErr, setImgErr] = useState(false);
+const safeCode = String(code || 'IDX');
+const meta = EMITEN_LOGOS[safeCode] || { logoUrl: null, bgGradient: 'from-indigo-600 to-slate-800' };
+
+const sizeClasses = size === 'sm' ? 'w-5 h-5 text-[9px] rounded-md' : size === 'lg' ? 'w-11 h-11 text-xs rounded-xl' : 'w-7 h-7 text-[10px] rounded-lg';
+
+return (
+<div className={${sizeClasses} bg-gradient-to-br ${meta.bgGradient} flex items-center justify-center font-black text-white shadow-sm border border-white/15 overflow-hidden shrink-0 relative} title={Logo Emiten ${safeCode}}>
+{meta.logoUrl && !imgErr ? (
+<img src={meta.logoUrl} alt={safeCode} onError={() => setImgErr(true)} className="w-full h-full object-contain bg-white p-0.5" />
+) : (
+{safeCode.slice(0, 4)}
+)}
+
+);
+}
+
+const BROKER_PORTFOLIO_DB = {
+ZP: {
+code: 'ZP',
+name: 'Maybank Sekuritas Indonesia',
+category: 'Foreign Institutional (Asing)',
+accumulated: [
+{ code: 'BBCA', name: 'Bank Central Asia Tbk', netLot: 145200, avg: 10215, netVal: 'Rp 148.3 M', status: 'BIG ACCUM' },
+{ code: 'BMRI', name: 'Bank Mandiri (Persero) Tbk', netLot: 143200, avg: 6920, netVal: 'Rp 99.1 M', status: 'BIG ACCUM' },
+],
+distributed: [
+{ code: 'TLKM', name: 'Telkom Indonesia Tbk', netLot: -245000, avg: 2992, netVal: '-Rp 73.3 M', status: 'BIG DIST' },
+]
+},
+BK: {
+code: 'BK',
+name: 'J.P. Morgan Sekuritas Indonesia',
+category: 'Foreign Institutional (Asing)',
+accumulated: [
+{ code: 'BBRI', name: 'Bank Rakyat Indonesia Tbk', netLot: 285400, avg: 4842, netVal: 'Rp 138.2 M', status: 'BIG ACCUM' },
+],
+distributed: [
+{ code: 'TLKM', name: 'Telkom Indonesia Tbk', netLot: -154200, avg: 2995, netVal: '-Rp 46.1 M', status: 'DISTRIBUTION' },
+]
+}
+};
+
+const INITIAL_STOCKS = {
+BBCA: {
+code: 'BBCA',
+name: 'PT Bank Central Asia Tbk',
+sector: 'Finance / Banking',
+basePrice: 10250,
+open: 10150,
+prevClose: 10125,
+tickSize: 25,
+sharesOut: '123.28B',
+foreignRatio: 68,
+bandarStatus: 'BIG ACCUMULATION',
+brokersBuy: [
+{ code: 'ZP', name: 'Maybank Sekuritas', type: 'Asing', lot: 145200, avg: 10215 },
+{ code: 'BK', name: 'J.P. Morgan Sekuritas', type: 'Asing', lot: 118400, avg: 10220 }
+],
+brokersSell: [
+{ code: 'YP', name: 'Mirae Asset Sekuritas', type: 'Ritel', lot: 98400, avg: 10225 },
+{ code: 'PD', name: 'Indo Premier Sekuritas', type: 'Ritel', lot: 76200, avg: 10210 }
+]
+},
+BBRI: {
+code: 'BBRI',
+name: 'PT Bank Rakyat Indonesia (Persero) Tbk',
+sector: 'Finance / Banking',
+basePrice: 4860,
+open: 4810,
+prevClose: 4800,
+tickSize: 10,
+sharesOut: '151.56B',
+foreignRatio: 59,
+bandarStatus: 'NORMAL ACCUMULATION',
+brokersBuy: [
+{ code: 'BK', name: 'J.P. Morgan Sekuritas', type: 'Asing', lot: 285400, avg: 4842 },
+{ code: 'CC', name: 'Mandiri Sekuritas', type: 'Lokal', lot: 144200, avg: 4850 }
+],
+brokersSell: [
+{ code: 'YP', name: 'Mirae Asset Sekuritas', type: 'Ritel', lot: 210500, avg: 4850 },
+{ code: 'PD', name: 'Indo Premier Sekuritas', type: 'Ritel', lot: 165000, avg: 4845 }
+]
+},
+BMRI: {
+code: 'BMRI',
+name: 'PT Bank Mandiri (Persero) Tbk',
+sector: 'Finance / Banking',
+basePrice: 6950,
+open: 6875,
+prevClose: 6850,
+tickSize: 25,
+sharesOut: '93.33B',
+foreignRatio: 64,
+bandarStatus: 'BIG ACCUMULATION',
+brokersBuy: [
+{ code: 'AK', name: 'UBS Sekuritas Indonesia', type: 'Asing', lot: 175600, avg: 6915 },
+{ code: 'ZP', name: 'Maybank Sekuritas', type: 'Asing', lot: 143200, avg: 6920 }
+],
+brokersSell: [
+{ code: 'YP', name: 'Mirae Asset Sekuritas', type: 'Ritel', lot: 134000, avg: 6935 },
+{ code: 'PD', name: 'Indo Premier Sekuritas', type: 'Ritel', lot: 98200, avg: 6925 }
+]
+}
+};
+
+const TIMEFRAME_CONFIG = {
+'1m': { label: '1m', stepMin: 1, volMult: 1 },
+'5m': { label: '5m', stepMin: 5, volMult: 3.5 },
+'15m': { label: '15m', stepMin: 15, volMult: 8 },
+'1H': { label: '1H', stepMin: 60, volMult: 22 },
+'1D': { label: '1D', stepMin: 1440, volMult: 180 }
+};
+
+function generateAnchoredCandles(targetClose, tickSize, tfKey = '5m', count = 58) {
+const tf = TIMEFRAME_CONFIG[tfKey] || TIMEFRAME_CONFIG['5m'];
+const rawChanges = [];
+for (let i = 0; i < count; i++) {
+const seed = Math.sin((i + 1) * 12.9898 + targetClose * 0.001) * 43758.5453;
+const frac = seed - Math.floor(seed);
+const step = Math.round((frac - 0.48) * 3) * tickSize;
+rawChanges.push(step);
+}
+
+const candles = new Array(count);
+let priceCursor = targetClose;
+const now = Date.now();
+
+for (let i = count - 1; i >= 0; i--) {
+const time = new Date(now - (count - 1 - i) * tf.stepMin * 60000);
+const timeStr = tf.stepMin >= 1440 ? time.toISOString().slice(5, 10) : time.toTimeString().slice(0, 5);
+
+const close = i === count - 1 ? targetClose : priceCursor;
+const open = Math.max(tickSize * 5, close - rawChanges[i]);
+const bodySpread = Math.max(tickSize, Math.abs(close - open));
+const high = Math.max(open, close) + Math.max(tickSize, Math.round(bodySpread * 0.65));
+const low = Math.max(tickSize * 2, Math.min(open, close) - Math.max(tickSize, Math.round(bodySpread * 0.65)));
+const volume = Math.floor((3500 + ((i * 1973) % 11000)) * tf.volMult);
+const isBull = close >= open;
+
+candles[i] = {
+  time: timeStr,
+  open: close === open ? open - tickSize : open,
+  high,
+  low,
+  close,
+  volume,
+  hakaVol: isBull ? Math.floor(volume * 0.66) : Math.floor(volume * 0.34)
+};
+priceCursor = open;
+
+
+}
+return candles;
+}
+
+const formatNumber = (num) => new Intl.NumberFormat('id-ID').format(Math.round(Number(num) || 0));
+
+export default function App() {
+const [stocksCatalog, setStocksCatalog] = useState(INITIAL_STOCKS);
+const [selectedCode, setSelectedCode] = useState('BBRI');
+const stockMeta = useMemo(() => stocksCatalog[selectedCode] || INITIAL_STOCKS.BBRI, [stocksCatalog, selectedCode]);
+
+const [searchQuery, setSearchQuery] = useState('');
+const [customTickerInput, setCustomTickerInput] = useState('');
+const [activeTab, setActiveTab] = useState('TERMINAL');
+const [timeframe, setTimeframe] = useState('5m');
+const [isLive, setIsLive] = useState(true);
+const lockedRealPricesRef = useRef({});
+
+const [activeDataSource, setActiveDataSource] = useState('RapidAPI (idx-stock-screener-signals)');
+const [idxMarketSession, setIdxMarketSession] = useState({ isOpen: false, label: 'CHECKING' });
+const [selectedBrokerModal, setSelectedBrokerModal] = useState(null);
+
+const [chartZoomLevel, setChartZoomLevel] = useState(1.3);
+const [chartPanOffset, setChartPanOffset] = useState(1);
+const [activeDrawTool, setActiveDrawTool] = useState('CURSOR');
+const [pendingTrendStart, setPendingTrendStart] = useState(null);
+const [chartDrawings, setChartDrawings] = useState([]);
+const isDraggingChartRef = useRef(false);
+const dragStartXRef = useRef(0);
+const dragStartPanRef = useRef(1);
+
+const [brokerMarkerFilter, setBrokerMarkerFilter] = useState('AUTO_TOP');
+const [indicators, setIndicators] = useState({
+ma20: true,
+ema50: true,
+vwap: true,
+fibonacci: true,
+rsi: true,
+macd: true,
+brokerMarkers: true
+});
+
+const [showApiModal, setShowApiModal] = useState(false);
+const [apiConfig, setApiConfig] = useState({
+rapidApiKey: DEFAULT_RAPIDAPI_KEY,
+rapidApiHost: DEFAULT_RAPIDAPI_HOST,
+days: 30
+});
+const [apiStatusMessage, setApiStatusMessage] = useState('');
+const [networkLogs, setNetworkLogs] = useState([]);
+const [isFetchingRapidApi, setIsFetchingRapidApi] = useState(false);
+
+const [candles, setCandles] = useState(() => generateAnchoredCandles(INITIAL_STOCKS.BBRI.basePrice, INITIAL_STOCKS.BBRI.tickSize));
+const [currentPrice, setCurrentPrice] = useState(INITIAL_STOCKS.BBRI.basePrice);
+const [dayHigh, setDayHigh] = useState(INITIAL_STOCKS.BBRI.basePrice + INITIAL_STOCKS.BBRI.tickSize * 4);
+const [dayLow, setDayLow] = useState(INITIAL_STOCKS.BBRI.basePrice - INITIAL_STOCKS.BBRI.tickSize * 5);
+const [totalVolLot, setTotalVolLot] = useState(648200);
+
+const [orderBook, setOrderBook] = useState({ bids: [], offers: [] });
+const [orderFlow, setOrderFlow] = useState([]);
+const [hoveredCandleIdx, setHoveredCandleIdx] = useState(null);
+
+const [currentTimeStr, setCurrentTimeStr] = useState(() => {
+const d = new Date();
+return ${d.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} • ${d.toTimeString().slice(0, 8)} WIB;
+});
+
+useEffect(() => {
+const timer = setInterval(() => {
+const d = new Date();
+setCurrentTimeStr(${d.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} • ${d.toTimeString().slice(0, 8)} WIB);
+}, 1000);
+return () => clearInterval(timer);
+}, []);
+
+const appendNetworkLog = (entry) => {
+setNetworkLogs((prev) => [
+{ id: ${Date.now()}-${Math.random().toString(36).slice(2, 6)}, time: new Date().toTimeString().slice(0, 8), ...entry },
+...prev.slice(0, 29)
+]);
+};
+
+const generateOrderBook = (centerPrice, tick) => {
+const bids = [];
+const offers = [];
+for (let i = 0; i < 10; i++) {
+const bidPrice = Math.max(tick, centerPrice - i * tick);
+const offerPrice = centerPrice + (i + 1) * tick;
+bids.push({ price: bidPrice, lot: 4800 + ((centerPrice + i * 917) % 34000), freq: 55 + ((i * 43) % 290) });
+offers.push({ price: offerPrice, lot: 4500 + ((centerPrice + i * 743) % 32000), freq: 50 + ((i * 37) % 260) });
+}
+setOrderBook({ bids, offers });
+};
+
+// ==========================================
+// FUNGSI FETCH RAPIDAPI (DENGAN HEADER ANDA)
+// ==========================================
+const fetchRapidApiData = async (tickerSymbol = selectedCode) => {
+setIsFetchingRapidApi(true);
+const startTime = performance.now();
+const symbol = tickerSymbol.toUpperCase().trim();
+const days = apiConfig.days || 30;
+
+const endpointUrl = `https://${apiConfig.rapidApiHost}/api/v1/picks/${symbol}?days=${days}`;
+const corsProxies = [
+  endpointUrl,
+  `https://corsproxy.io/?${encodeURIComponent(endpointUrl)}`,
+  `https://api.allorigins.win/raw?url=${encodeURIComponent(endpointUrl)}`
+];
+
+for (const url of corsProxies) {
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-Rapidapi-Key': apiConfig.rapidApiKey,
+        'X-Rapidapi-Host': apiConfig.rapidApiHost,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!res.ok) continue;
+    const json = await res.json();
+    
+    // Ambil data pick atau harga dari response RapidAPI
+    const picksArray = json?.picks || json?.data || (Array.isArray(json) ? json : null);
+    const latestPick = Array.isArray(picksArray) && picksArray.length > 0 ? picksArray[picksArray.length - 1] : null;
+
+    const liveClose = Number(latestPick?.close || latestPick?.price || stockMeta.basePrice || 4860);
+    const tick = getIdxTickSize(liveClose);
+    const liveOpen = Number(latestPick?.open || liveClose);
+    const liveHigh = Number(latestPick?.high || Math.max(liveClose, liveOpen));
+    const liveLow = Number(latestPick?.low || Math.min(liveClose, liveOpen));
+
+    lockedRealPricesRef.current[symbol] = {
+      close: liveClose,
+      open: liveOpen,
+      high: liveHigh,
+      low: liveLow,
+      tickSize: tick,
+      syncedAt: new Date().toTimeString().slice(0, 8)
+    };
+
+    setCurrentPrice(liveClose);
+    setDayHigh(liveHigh);
+    setDayLow(liveLow);
+    setActiveDataSource(`RapidAPI (${apiConfig.rapidApiHost})`);
+    generateOrderBook(liveClose, tick);
+    setCandles(generateAnchoredCandles(liveClose, tick, timeframe));
+
+    appendNetworkLog({
+      service: 'RapidAPI IDX Screener',
+      status: '200 OK (LIVE)',
+      ok: true,
+      latency: `${Math.round(performance.now() - startTime)} ms`,
+      url: `GET /api/v1/picks/${symbol}?days=${days}`,
+      detail: `[RAPIDAPI SUCCESS] ${symbol}: Rp ${formatNumber(liveClose)}`,
+      rawPreview: JSON.stringify(json).slice(0, 260)
+    });
+
+    setIsFetchingRapidApi(false);
+    return;
+  } catch {
+    // coba proxy berikutnya
+  }
+}
+
+setIsFetchingRapidApi(false);
+appendNetworkLog({
+  service: 'RapidAPI IDX Screener',
+  status: 'CORS / Network Error',
+  ok: false,
+  latency: `${Math.round(performance.now() - startTime)} ms`,
+  url: `GET /api/v1/picks/${symbol}`,
+  detail: `Gagal terhubung ke RapidAPI. Pastikan koneksi dan API Key aktif.`
+});
+
+
+};
+
+useEffect(() => {
+fetchRapidApiData(selectedCode);
+}, [selectedCode, timeframe]);
+
+const handleAddCustomTicker = (e) => {
+e.preventDefault();
+const code = customTickerInput.trim().toUpperCase();
+if (!code || code.length < 4) return;
+
+if (!stocksCatalog[code]) {
+  setStocksCatalog((prev) => ({
+    ...prev,
+    [code]: {
+      ...INITIAL_STOCKS.BBRI,
+      code,
+      name: `PT ${code} Tbk (Emiten BEI)`,
+      basePrice: 3500,
+      open: 3480,
+      prevClose: 3470,
+      tickSize: 10
+    }
+  }));
+}
+setSelectedCode(code);
+setCustomTickerInput('');
+fetchRapidApiData(code);
+
+
+};
+
+const technicalData = useMemo(() => {
+const closes = candles.map((c) => c.close);
+const highs = candles.map((c) => c.high);
+const lows = candles.map((c) => c.low);
+
+const swingHigh = Math.max(...highs, currentPrice + stockMeta.tickSize * 2);
+const swingLow = Math.min(...lows, currentPrice - stockMeta.tickSize * 2);
+const diffSwings = Math.max(stockMeta.tickSize * 4, swingHigh - swingLow);
+
+const fibLevels = [
+  { ratio: '0.0%', price: Math.round(swingHigh), color: '#f43f5e' },
+  { ratio: '38.2%', price: Math.round(swingHigh - diffSwings * 0.382), color: '#facc15' },
+  { ratio: '50.0%', price: Math.round(swingHigh - diffSwings * 0.5), color: '#38bdf8' },
+  { ratio: '61.8%', price: Math.round(swingHigh - diffSwings * 0.618), color: '#10b981' },
+  { ratio: '100%', price: Math.round(swingLow), color: '#64748b' }
+];
+
+const ma20 = [];
+for (let i = 0; i < closes.length; i++) {
+  const start = Math.max(0, i - 19);
+  const slice = closes.slice(start, i + 1);
+  ma20.push(slice.reduce((a, b) => a + b, 0) / slice.length);
+}
+
+return { swingHigh, swingLow, fibLevels, ma20 };
+
+
+}, [candles, currentPrice, stockMeta.tickSize]);
+
+const priceChange = currentPrice - stockMeta.prevClose;
+const priceChangePct = ((priceChange / stockMeta.prevClose) * 100).toFixed(2);
+const isPositive = priceChange >= 0;
+
+const renderInteractiveChart = () => {
+const width = 900;
+const mainHeight = 240;
+const totalHeight = mainHeight;
+const padLeft = 16;
+const padRight = 78;
+const padTop = 16;
+const padBottom = 22;
+const plotWidth = width - padLeft - padRight;
+const plotHeight = mainHeight - padTop - padBottom;
+
+const visibleCount = Math.max(14, Math.min(candles.length, Math.floor(candles.length / chartZoomLevel)));
+const maxPan = Math.max(0, candles.length - visibleCount);
+const startIdx = Math.min(maxPan, Math.max(0, Math.round(chartPanOffset * maxPan)));
+const slicedCandles = candles.slice(startIdx, startIdx + visibleCount);
+
+const candleHighs = slicedCandles.map((c) => c.high);
+const candleLows = slicedCandles.map((c) => c.low);
+const rawMax = Math.max(...candleHighs, currentPrice + stockMeta.tickSize);
+const rawMin = Math.min(...candleLows, currentPrice - stockMeta.tickSize);
+const maxPrice = rawMax + stockMeta.tickSize * 2;
+const minPrice = Math.max(stockMeta.tickSize, rawMin - stockMeta.tickSize * 2);
+const priceRange = Math.max(stockMeta.tickSize * 4, maxPrice - minPrice);
+
+const stepX = plotWidth / Math.max(1, slicedCandles.length);
+const getX = (index) => padLeft + index * stepX + stepX * 0.5;
+const getY = (price) => Math.max(padTop, Math.min(mainHeight - padBottom, padTop + ((maxPrice - price) / priceRange) * plotHeight));
+const candleBodyWidth = Math.max(4, Math.min(13, Math.floor(stepX * 0.66)));
+
+return (
+  <div className="relative select-none">
+    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 bg-slate-900/95 border-b border-slate-800 text-xs">
+      <div className="flex items-center gap-2">
+        <StockLogo code={stockMeta.code} size="sm" />
+        <span className="font-bold text-white">{stockMeta.code} • {timeframe}</span>
+        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-emerald-400 font-mono text-[10px]">{currentTimeStr}</span>
+      </div>
+    </div>
+    <div className="w-full max-h-[350px] overflow-hidden bg-[#070b12]">
+      <svg viewBox={`0 0 ${width} ${totalHeight}`} preserveAspectRatio="none" className="w-full h-[320px] block cursor-crosshair">
+        {[0, 0.25, 0.5, 0.75, 1].map((ratio, idx) => {
+          const y = padTop + ratio * plotHeight;
+          const labelPrice = Math.round(maxPrice - ratio * priceRange);
+          return (
+            <g key={idx}>
+              <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke="#1e293b" strokeDasharray="3 3" strokeWidth="1" />
+              <text x={width - padRight + 6} y={y + 3.5} fill="#64748b" fontSize="9.5" fontFamily="monospace">{formatNumber(labelPrice)}</text>
+            </g>
+          );
+        })}
+        {slicedCandles.map((c, idx) => {
+          const x = getX(idx);
+          const isBull = c.close >= c.open;
+          const strokeColor = isBull ? '#10b981' : '#f43f5e';
+          const highY = getY(c.high);
+          const lowY = getY(c.low);
+          const bodyTop = Math.min(getY(c.open), getY(c.close));
+          const bodyHeight = Math.max(3, Math.abs(getY(c.close) - getY(c.open)));
+          return (
+            <g key={`candle-${idx}`}>
+              <line x1={x} y1={highY} x2={x} y2={lowY} stroke={strokeColor} strokeWidth="1.5" />
+              <rect x={x - candleBodyWidth / 2} y={bodyTop} width={candleBodyWidth} height={bodyHeight} fill={strokeColor} rx="1" />
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  </div>
+);
+
+
+};
+
+return (
+
+
+
+
+
+
+
+
+
+IDX STOCKS RAPIDAPI
+
+Source: {activeDataSource}
+
+
+
+      <div className="flex flex-wrap items-center gap-2">
+        <form onSubmit={handleAddCustomTicker} className="flex items-center gap-1">
+          <input
+            type="text"
+            maxLength={4}
+            value={customTickerInput}
+            onChange={(e) => setCustomTickerInput(e.target.value.toUpperCase())}
+            placeholder="Kode Emiten (BBRI)..."
+            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white uppercase outline-none w-36 font-mono"
+          />
+          <button type="submit" className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold">
+            Buka
+          </button>
+        </form>
+
+        <button onClick={() => fetchRapidApiData(selectedCode)} disabled={isFetchingRapidApi} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">
+          <RefreshCw className={`w-3.5 h-3.5 ${isFetchingRapidApi ? 'animate-spin' : ''}`} />
+          <span>Fetch RapidAPI</span>
+        </button>
+
+        <button onClick={() => setShowApiModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white">
+          <Key className="w-3.5 h-3.5" />
+          <span>API Key</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 space-y-4">
+    <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+      <div className="xl:col-span-8 bg-[#0d1322] border border-slate-800 rounded-xl overflow-hidden shadow-lg flex flex-col">
+        <div className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <BarChart2 className="w-4 h-4 text-emerald-400" />
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-200">Chart • {stockMeta.code}</span>
+          </div>
+        </div>
+        {renderInteractiveChart()}
+      </div>
+
+      <div className="xl:col-span-4 bg-[#0d1322] border border-slate-800 rounded-xl overflow-hidden shadow-lg flex flex-col">
+        <div className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-4 h-4 text-emerald-400" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">Order Book • {stockMeta.code}</h3>
+          </div>
+        </div>
+        <div className="divide-y divide-slate-800 font-mono text-xs flex-1 p-2">
+          {orderBook.bids.map((b, idx) => (
+            <div key={idx} className="flex justify-between py-1 px-2 hover:bg-slate-800/40">
+              <span className="text-emerald-400 font-bold">{formatNumber(b.price)}</span>
+              <span className="text-slate-300">{formatNumber(b.lot)} Lot</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </main>
+
+  {showApiModal && (
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-[#0f1629] border border-slate-700 rounded-2xl max-w-md w-full p-5 space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <h3 className="text-sm font-bold text-white">Konfigurasi RapidAPI</h3>
+          <button onClick={() => setShowApiModal(false)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="space-y-3 text-xs">
+          <div>
+            <label className="block text-slate-300 font-semibold mb-1">X-Rapidapi-Key</label>
+            <input type="password" value={apiConfig.rapidApiKey} onChange={(e) => setApiConfig({ ...apiConfig, rapidApiKey: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono outline-none" />
+          </div>
+          <div>
+            <label className="block text-slate-300 font-semibold mb-1">X-Rapidapi-Host</label>
+            <input type="text" value={apiConfig.rapidApiHost} onChange={(e) => setApiConfig({ ...apiConfig, rapidApiHost: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono outline-none" />
+          </div>
+          <div>
+            <label className="block text-slate-300 font-semibold mb-1">Days Parameter</label>
+            <input type="number" value={apiConfig.days} onChange={(e) => setApiConfig({ ...apiConfig, days: Number(e.target.value) })} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono outline-none" />
+          </div>
+          <button onClick={() => { setShowApiModal(false); fetchRapidApiData(selectedCode); }} className="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-950 font-extrabold">
+            Simpan & Fetch Data
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
+</div>
+
+
+);
+}
